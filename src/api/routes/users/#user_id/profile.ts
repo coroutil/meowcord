@@ -6,6 +6,7 @@ import { Badge, Member, Relationship, User } from "@spacebar/database";
 import { broadcastUserUpdate, Config, DiscordApiErrors, emitEvent, FieldErrors, handleFile, instanceName, loadStaffRoles, staffBadgeRole, UserUpdateEvent } from "@spacebar/util";
 import { PartialConnectedAccountResponse, PrivateUserProjection, PublicUserProjection, RelationshipType, UserProfileModifySchema } from "@spacebar/schemas";
 
+import { earnedMilestoneBadges, milestones } from "@spacebar/api/util/utility/milestones";
 import { prideBadges } from "@spacebar/api/util/utility/prideBadges";
 
 import { isSubscriptionBadge } from "@spacebar/api/util/utility/profile";
@@ -49,17 +50,16 @@ router.get("/", route({ responses: { 200: { body: "UserProfileResponse" } } }), 
         .where("user.id = :user_id", { user_id })
         .getOneOrFail();
 
-    const memberships = await Member.find({
-        where: { id: user_id },
-        select: { guild_id: true, nick: true },
-    });
-
     let mutual_guilds: { id: string; nick: string | null }[] | undefined;
     if (with_mutual_guilds === "true") {
         mutual_guilds = [];
         if (user_id !== req.user_id) {
-            const own = new Set((await Member.find({ where: { id: req.user_id }, select: { guild_id: true } })).map((x) => x.guild_id));
-            mutual_guilds = memberships.filter((x) => own.has(x.guild_id)).map((x) => ({ id: x.guild_id, nick: x.nick ?? null }));
+            const [memberships, ownMemberships] = await Promise.all([
+                Member.find({ where: { id: user_id }, select: { guild_id: true, nick: true } }),
+                Member.find({ where: { id: req.user_id }, select: { guild_id: true } }),
+            ]);
+            const own = new Set(ownMemberships.map((member) => member.guild_id));
+            mutual_guilds = memberships.filter((member) => own.has(member.guild_id)).map((member) => ({ id: member.guild_id, nick: member.nick ?? null }));
         }
     }
 
@@ -99,7 +99,7 @@ router.get("/", route({ responses: { 200: { body: "UserProfileResponse" } } }), 
         : null;
 
     const badges = [];
-    const badgeIds = (user.badge_ids ?? []).filter((id) => !user.federated_instance || id !== STAFF_BADGE_ID);
+    const badgeIds = (user.badge_ids ?? []).filter((id) => !milestones[id] && (!user.federated_instance || id !== STAFF_BADGE_ID));
     if (badgeIds.length) badges.push(...(await Badge.find({ where: { id: In(badgeIds) } })));
     const badgeRole = user.federated_instance || user.badge_ids?.includes(STAFF_BADGE_ID) ? null : staffBadgeRole(user.id, await loadStaffRoles());
     if (badgeRole) {
@@ -127,10 +127,8 @@ router.get("/", route({ responses: { 200: { body: "UserProfileResponse" } } }), 
         premium_guild_since: null,
         profile_themes_experiment_bucket: 4,
         user_profile: profileMetadata(user),
-        badges: arrangeBadges(
-            badges.filter((badge) => !isSubscriptionBadge(badge)),
-            badgeSettings(user),
-        ).visible,
+        badges: arrangeBadges([...badges.filter((badge) => !isSubscriptionBadge(badge)), ...(!user.federated_instance ? earnedMilestoneBadges(user) : [])], badgeSettings(user))
+            .visible,
         guild_badges: [],
         widgets: user.profile_widgets ?? [],
         legacy_username: null,
