@@ -4,7 +4,7 @@ import { join, resolve, relative, isAbsolute } from "node:path";
 import { randomUUID } from "node:crypto";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
-import type { Storage, StorageRead } from "./Storage";
+import type { Storage, StorageByteRange, StorageRead } from "./Storage";
 import ExifTransformer from "exif-be-gone";
 
 export class FileStorage implements Storage {
@@ -67,7 +67,7 @@ export class FileStorage implements Storage {
         }
     }
 
-    async openRead(path: string, signal?: AbortSignal): Promise<StorageRead | null> {
+    async openRead(path: string, signal?: AbortSignal, range?: StorageByteRange): Promise<StorageRead | null> {
         let filename = await this.safePath(path);
         try {
             if ((await fsp.stat(filename)).isDirectory()) {
@@ -82,10 +82,15 @@ export class FileStorage implements Storage {
                     await handle.close();
                     return null;
                 }
+                if (range && (!Number.isSafeInteger(range.start) || !Number.isSafeInteger(range.end) || range.start < 0 || range.end < range.start || range.end >= stat.size)) {
+                    await handle.close();
+                    throw new Error("Invalid storage byte range");
+                }
                 const stream = handle.createReadStream({
                     autoClose: true,
                     highWaterMark: 64 * 1024,
                     signal,
+                    ...(range ? { start: range.start, end: range.end } : {}),
                 });
                 stream.on("error", () => undefined);
                 return { size: stat.size, stream };

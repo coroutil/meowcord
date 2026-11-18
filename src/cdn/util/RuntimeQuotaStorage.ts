@@ -6,7 +6,7 @@ import { HTTPError } from "lambert-server/HTTPError";
 import { QueryRunner } from "typeorm";
 import { getDatabase } from "../../database/Database";
 import { Config } from "../../util/util/Config";
-import { Storage, StorageRead } from "./Storage";
+import { Storage, StorageByteRange, StorageRead } from "./Storage";
 import { storageOwnership } from "./storageOwnership";
 import { StorageInventoryReferences } from "./storageInventoryReferences";
 
@@ -337,11 +337,11 @@ export class QuotaStorage implements Storage {
             }
         });
     }
-    async openRead(path: string, signal?: AbortSignal): Promise<StorageRead | null> {
+    async openRead(path: string, signal?: AbortSignal, range?: StorageByteRange): Promise<StorageRead | null> {
         this.reading.set(path, (this.reading.get(path) ?? 0) + 1);
         let read: StorageRead | null;
         try {
-            read = await this.backend.openRead!(path, signal);
+            read = await this.backend.openRead!(path, signal, range);
         } catch (error) {
             this.release(path);
             throw error;

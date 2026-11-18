@@ -10,7 +10,7 @@ const run = async (upstream, verify) => {
     const calls = [];
     vm.runInNewContext(
         ts.transpileModule(fs.readFileSync("src/api/middlewares/ExternalProxy.ts", "utf8"), {
-            compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+            compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, esModuleInterop: true },
         }).outputText,
         {
             module,
@@ -23,7 +23,6 @@ const run = async (upstream, verify) => {
                     ? {
                           Config: { get: () => ({ embeds: {}, cdn: { proxyCacheHeaderSeconds: 60 } }) },
                           verifyExternalPath: () => true,
-                          corsProxyUrl: (url) => `https://cors.estrogen.delivery/?url=${encodeURIComponent(url.href)}`,
                           fetchPublicUrl: async (url, options, redirects, limits) => {
                               calls.push({ url, options, redirects, limits });
                               return upstream(options, limits);
@@ -54,16 +53,16 @@ const run = async (upstream, verify) => {
     }
 };
 
-test("legacy signed media goes through the bounded public fetcher and rejects non-media", () =>
+test("external media uses Meowcord’s bounded direct public fetcher and rejects non-media", () =>
     run(
         () => new Response("<html>", { headers: { "content-type": "text/html" } }),
         async (url, calls) => {
             const response = await fetch(url);
             assert.equal(response.status, 415);
             await response.text();
-            assert.equal(new URL(calls[0].url).searchParams.get("url"), "https://source.test/media");
-            assert.equal(calls[0].options.redirect, "error");
-            assert.equal(calls[0].redirects, 0);
+            assert.equal(calls[0].url, "https://source.test/media");
+            assert.equal(calls[0].options.redirect, "follow");
+            assert.equal(calls[0].redirects, 3);
             assert.equal(calls[0].limits.maxBytes, 50 * 1024 * 1024);
             assert.equal(calls[0].limits.timeoutMs, 15000);
         },
@@ -100,7 +99,7 @@ test("historical resizing uses bounded CORS downloads and limits decoder input a
     const calls = [];
     vm.runInNewContext(
         ts.transpileModule(fs.readFileSync("src/api/middlewares/ImageProxy.ts", "utf8"), {
-            compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+            compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, esModuleInterop: true },
         }).outputText,
         {
             module,

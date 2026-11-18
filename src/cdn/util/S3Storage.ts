@@ -1,5 +1,5 @@
 import { Readable } from "node:stream";
-import type { Storage, StorageRead } from "./Storage";
+import type { Storage, StorageByteRange, StorageRead } from "./Storage";
 
 const readableToBuffer = (readable: Readable): Promise<Buffer> =>
     new Promise((resolve, reject) => {
@@ -89,20 +89,32 @@ export class S3Storage implements Storage {
         );
     }
 
-    async openRead(path: string, signal?: AbortSignal): Promise<StorageRead | null> {
+    async openRead(path: string, signal?: AbortSignal, range?: StorageByteRange): Promise<StorageRead | null> {
         signal = signal ? AbortSignal.any([signal, AbortSignal.timeout(30000)]) : AbortSignal.timeout(30000);
         const client = this.client as {
             getObject(
-                input: { Bucket: string; Key: string },
+                input: { Bucket: string; Key: string; Range?: string },
                 options: { abortSignal?: AbortSignal },
-            ): Promise<{ Body?: Readable; ContentLength?: number; Metadata?: Record<string, string> }>;
+            ): Promise<{ Body?: Readable; ContentLength?: number; ContentRange?: string; Metadata?: Record<string, string> }>;
         };
         try {
-            const object = await client.getObject({ Bucket: this.bucket, Key: `${this.bucketBasePath}${path}` }, { abortSignal: signal });
+            const object = await client.getObject(
+                { Bucket: this.bucket, Key: `${this.bucketBasePath}${path}`, ...(range ? { Range: `bytes=${range.start}-${range.end}` } : {}) },
+                { abortSignal: signal },
+            );
             if (!object.Body) return null;
             if (!Number.isSafeInteger(object.ContentLength) || (object.ContentLength ?? -1) < 0 || !(object.Body instanceof Readable)) {
                 object.Body.destroy();
                 throw new Error("Invalid storage stream metadata");
+            }
+            let size = object.ContentLength as number;
+            if (range) {
+                const returned = /^bytes (\d+)-(\d+)\/(\d+)$/.exec(object.ContentRange ?? "");
+                if (!returned || Number(returned[1]) !== range.start || Number(returned[2]) !== range.end || !Number.isSafeInteger(Number(returned[3]))) {
+                    object.Body.destroy();
+                    throw new Error("S3 storage did not honor the requested byte range");
+                }
+                size = Number(returned[3]);
             }
             object.Body.on("error", () => undefined);
             if (signal) {
@@ -111,7 +123,7 @@ export class S3Storage implements Storage {
                 object.Body.once("close", () => signal.removeEventListener("abort", abort));
                 if (signal.aborted) abort();
             }
-            return { size: object.ContentLength as number, stream: object.Body, generation: object.Metadata?.generation };
+            return { size, stream: object.Body, generation: object.Metadata?.generation };
         } catch (error) {
             if (["NoSuchKey", "NotFound"].includes((error as Error).name)) return null;
             throw error;

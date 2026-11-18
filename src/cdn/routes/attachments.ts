@@ -17,6 +17,7 @@ import {
     Snowflake,
     UrlSignResult,
     isRequestSignature,
+    parseByteRange,
 } from "@spacebar/util";
 import { storage, multer, setCacheControl, safeMediaType } from "../util";
 import { InternalCdnAttachment } from "@spacebar/util/dtos/MessageOptions";
@@ -174,13 +175,39 @@ router.get("/:channel_id/:attachment_id/:filename", setCacheControl, async (req:
             else if (!guessed.startsWith("text/") && !guessed.startsWith("application/json")) res.set("Content-Type", "application/octet-stream");
         }
 
-        res.set("Content-Length", String(file.size));
+        res.set("Accept-Ranges", "bytes");
+        const range = req.method === "GET" ? parseByteRange(req.headers.range, file.size) : null;
+        if (range === "invalid") {
+            res.set("Content-Range", `bytes */${file.size}`);
+            res.status(416).end();
+            await finished(res);
+            return;
+        }
+
         if (req.method === "HEAD") {
+            res.set("Content-Length", String(file.size));
             res.end();
             await finished(res);
             return;
         }
-        await pipeline(inspected.stream, res, { signal: controller.signal });
+
+        let downloadStream = inspected.stream;
+        if (range) {
+            const fullSize = file.size;
+            inspected.stream.destroy();
+            const closed = finished(file.stream).catch(() => undefined);
+            file.stream.destroy();
+            await closed;
+            file = await storage.openRead(path, controller.signal, range);
+            if (!file || file.size !== fullSize) throw new HTTPError("File changed during download", 409);
+            res.status(206);
+            res.set("Content-Range", `bytes ${range.start}-${range.end}/${fullSize}`);
+            res.set("Content-Length", String(range.end - range.start + 1));
+            downloadStream = file.stream;
+        } else {
+            res.set("Content-Length", String(file.size));
+        }
+        await pipeline(downloadStream, res, { signal: controller.signal });
     } catch (error) {
         if (!res.headersSent && !res.destroyed) throw error;
         if (!res.writableFinished) res.destroy();

@@ -4,14 +4,20 @@ import fs from "node:fs";
 import { red } from "picocolors";
 process.cwd();
 
+export interface StorageByteRange {
+    start: number;
+    end: number;
+}
+
 export interface StorageRead {
+    /** Total object size, not the number of bytes in a ranged stream. */
     size: number;
     generation?: string;
     stream: Readable;
 }
 
 export interface Storage {
-    openRead?(path: string, signal?: AbortSignal): Promise<StorageRead | null>;
+    openRead?(path: string, signal?: AbortSignal, range?: StorageByteRange): Promise<StorageRead | null>;
     set(path: string, data: Buffer, principal?: string, generation?: string): Promise<void>;
     clone(path: string, newPath: string, generation?: string): Promise<void>;
     get(path: string): Promise<Buffer | null>;

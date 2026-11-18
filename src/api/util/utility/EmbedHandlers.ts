@@ -9,6 +9,7 @@ import {
     Config,
     emitEvent,
     corsProxyUrl,
+    externalProxyUrl,
     guessMediaType,
     isEmbedPlayerUrl,
     isLocalMediaUrl,
@@ -68,6 +69,8 @@ export const getProxyUrl = (url: URL, _width: number, _height: number): string =
     return corsProxyUrl(url);
 };
 
+const getVideoProxyUrl = (url: URL): string => (isLocalMediaUrl(url.href) ? url.href : externalProxyUrl(url));
+
 const getMeta = ($: cheerio.CheerioAPI, name: string): string | undefined => {
     let elem = $(`meta[property="${name}"]`);
     if (!elem.length) elem = $(`meta[name="${name}"]`);
@@ -123,7 +126,7 @@ export const pageVideo = (page: URL, metas: Pick<ReturnType<typeof getMetaDescri
     if (!contentType?.startsWith("video/") || !/^https?:$/.test(video.protocol)) return undefined;
     return {
         url: video.href,
-        proxy_url: getProxyUrl(video, metas.video_width, metas.video_height),
+        proxy_url: getVideoProxyUrl(video),
         width: metas.video_width,
         height: metas.video_height,
         content_type: contentType,
@@ -183,7 +186,7 @@ const genericVideoHandler = async (url: URL, head: Response): Promise<Embed | nu
         thumbnail: { url: url.href, proxy_url: videoFrameUrl(url), width: dims.width, height: dims.height, content_type: "image/jpeg" },
         video: {
             url: url.href,
-            proxy_url: getProxyUrl(url, dims.width, dims.height),
+            proxy_url: getVideoProxyUrl(url),
             width: dims.width,
             height: dims.height,
             content_type: head.headers.get("content-type") ?? undefined,
@@ -235,7 +238,7 @@ const gifvHandler =
             thumbnail: makeEmbedImage(metas.image && new URL(metas.image, page.url).href, metas.width ?? metas.video_width, metas.height ?? metas.video_height),
             video: {
                 url: video.href,
-                proxy_url: getProxyUrl(video, metas.video_width, metas.video_height),
+                proxy_url: getVideoProxyUrl(video),
                 width: metas.video_width,
                 height: metas.video_height,
             },
@@ -355,7 +358,7 @@ export const fxTwitterStatusEmbed = (tweet: FxTwitterStatus): Embed => {
         thumbnail: video?.thumbnail_url ? makeEmbedImage(video.thumbnail_url, video.width, video.height) : undefined,
         video: video && {
             url: video.target.href,
-            proxy_url: getProxyUrl(video.target, video.width, video.height),
+            proxy_url: getVideoProxyUrl(video.target),
             width: video.width,
             height: video.height,
             content_type: "video/mp4",

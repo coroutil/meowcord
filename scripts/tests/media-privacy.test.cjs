@@ -7,7 +7,7 @@ const types = { Container: 17, Section: 9, Thumbnail: 11, MediaGallery: 12, File
 const moduleFixture = { exports: {} };
 vm.runInNewContext(
     ts.transpileModule(fs.readFileSync("src/util/util/MediaProxy.ts", "utf8"), {
-        compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+        compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, esModuleInterop: true },
     }).outputText,
     {
         module: moduleFixture,

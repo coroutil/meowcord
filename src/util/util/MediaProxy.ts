@@ -115,12 +115,23 @@ export function proxyEmbedMedia(embed: Embed): Embed {
     for (const key of ["image", "thumbnail", "video"] as const) {
         const media = embed[key];
         if (key === "video" && media && isEmbedPlayerUrl(media.url)) out.video = { url: media.url, width: media.width, height: media.height };
-        else if (media?.url)
+        else if (media?.url) {
+            const parsed = URL.canParse(media.url) ? new URL(media.url) : undefined;
+            const contentType = media.content_type ?? guessMediaType(media.url);
+            const mediaUrl =
+                key === "video" &&
+                parsed &&
+                /^https?:$/.test(parsed.protocol) &&
+                !isLocalMediaUrl(parsed.href) &&
+                contentType?.startsWith("video/")
+                    ? externalProxyUrl(parsed)
+                    : proxied(media.url, media.proxy_url);
             out[key] = {
                 ...media,
-                url: proxied(media.url, media.proxy_url),
-                proxy_url: proxied(media.url, media.proxy_url),
+                url: mediaUrl,
+                proxy_url: mediaUrl,
             };
+        }
     }
     const { video } = embed;
     if (embed.type !== EmbedType.rich && !embed.thumbnail && video?.url && video.proxy_url && !isEmbedPlayerUrl(video.url) && URL.canParse(video.url)) {

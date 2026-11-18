@@ -18,7 +18,7 @@ const Config = { get: () => settings };
 
 const load = (file, imports, globals = {}) => {
     const module = { exports: {} };
-    vm.runInNewContext(ts.transpileModule(fs.readFileSync(file, "utf8"), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText, {
+    vm.runInNewContext(ts.transpileModule(fs.readFileSync(file, "utf8"), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, esModuleInterop: true } }).outputText, {
         module,
         exports: module.exports,
         URL,
@@ -118,7 +118,7 @@ test("direct video embeds carry a preview frame thumbnail, and old ones without 
     assert.equal(embed.thumbnail.proxy_url, media.videoFrameUrl(url));
     const shown = media.proxyEmbedMedia(embed);
     assert.equal(shown.thumbnail.proxy_url, media.videoFrameUrl(url));
-    assert.match(shown.video.proxy_url, /^https:\/\/cors\.estrogen\.delivery\//);
+    assert.equal(shown.video.proxy_url, media.externalProxyUrl(url));
     const legacy = media.proxyEmbedMedia({ ...embed, thumbnail: undefined });
     assert.equal(legacy.thumbnail.proxy_url, media.videoFrameUrl(url));
     assert.equal(legacy.thumbnail.width, 960);
@@ -137,7 +137,7 @@ test("pages with og:video become video embeds only for known players or real vid
     const file = embeds.pageVideo(page, { video: "/clip.mp4", video_width: 640, video_height: 360 });
     assert.equal(file.url, "https://vimeo.com/clip.mp4");
     assert.equal(file.content_type, "video/mp4");
-    assert.match(file.proxy_url, /^https:\/\/cors\.estrogen\.delivery\//);
+    assert.equal(file.proxy_url, media.externalProxyUrl(new URL(file.url)));
     assert.equal(embeds.pageVideo(page, { video: "https://player.twitch.tv/?video=1", video_type: "text/html", video_width: 620, video_height: 378 }), undefined);
     assert.equal(embeds.pageVideo(page, { video: "https://player.vimeo.com/video/1", video_type: "text/html" }), undefined);
 

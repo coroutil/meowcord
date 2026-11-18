@@ -70,6 +70,15 @@ async function fixture(storage, signed = false) {
             hasValidSignature: () => false,
             NewUrlUserSignatureData: class {},
             UrlSignResult: { fromUrl: () => null },
+            parseByteRange: (header, size) => {
+                if (!header) return null;
+                const match = /^bytes=(\d*)-(\d*)$/.exec(header.trim());
+                if (!match || (!match[1] && !match[2])) return "invalid";
+                const start = match[1] ? Number(match[1]) : Math.max(0, size - Number(match[2]));
+                const end = match[1] && match[2] ? Math.min(Number(match[2]), size - 1) : size - 1;
+                if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start > end || start >= size) return "invalid";
+                return { start, end };
+            },
             Snowflake: {},
         },
         "../util": { storage, multer: { single: () => noOp }, setCacheControl: noOp },
@@ -365,6 +374,42 @@ test("storage errors release capacity for subsequent downloads", async () => {
         const response = await fetch(`${f.origin}/1/2/empty.bin`);
         assert.equal(response.status, 200);
         assert.equal(await response.text(), "");
+    } finally {
+        await f.close();
+    }
+});
+
+
+test("actual attachment HTTP serves byte ranges with 206 and rejects unsatisfiable ranges", async () => {
+    const source = Buffer.from("0123456789");
+    const reads = [];
+    const storage = {
+        openRead: async (_path, _signal, range) => {
+            reads.push(range ?? null);
+            const body = range ? source.subarray(range.start, range.end + 1) : source;
+            return { size: source.length, stream: Readable.from([body]) };
+        },
+        get: () => {
+            throw new Error("Whole read forbidden");
+        },
+    };
+    const f = await fixture(storage, true);
+    try {
+        const ranged = await fetch(`${f.origin}/1/2/clip.mp4`, {
+            headers: { signature: "fixture-signature", range: "bytes=3-6" },
+        });
+        assert.equal(ranged.status, 206);
+        assert.equal(ranged.headers.get("accept-ranges"), "bytes");
+        assert.equal(ranged.headers.get("content-range"), "bytes 3-6/10");
+        assert.equal(ranged.headers.get("content-length"), "4");
+        assert.equal(await ranged.text(), "3456");
+        assert.deepEqual(reads, [null, { start: 3, end: 6 }]);
+
+        const invalid = await fetch(`${f.origin}/1/2/clip.mp4`, {
+            headers: { signature: "fixture-signature", range: "bytes=20-30" },
+        });
+        assert.equal(invalid.status, 416);
+        assert.equal(invalid.headers.get("content-range"), "bytes */10");
     } finally {
         await f.close();
     }
